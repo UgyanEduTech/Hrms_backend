@@ -1,13 +1,15 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import JsonResponse
-from .models import LeaveRequest
+from .models import *
 from django.views.decorators.csrf import csrf_exempt
 from django.core.serializers import serialize
 import json
 from django.core.serializers.json import DjangoJSONEncoder
-
+from django.utils.timezone import now
+from .decorators import *
 
 # Create a new leave request
+
 @csrf_exempt
 def create_leave_request(request):
     if request.method == 'POST':
@@ -35,6 +37,7 @@ def create_leave_request(request):
     return JsonResponse({"error": "Invalid method."}, status=400)
 
 # Retrieve a specific leave request
+
 def leave_request_detail(request):
     # Retrieve pk from query parameters
     pk = request.GET.get('pk')
@@ -58,6 +61,7 @@ def leave_request_detail(request):
     })
 
 # Update an existing leave request
+
 @csrf_exempt
 def update_leave_request(request, id):
     # Fetch the LeaveRequest object using the id parameter
@@ -98,6 +102,7 @@ def update_leave_request(request, id):
     return JsonResponse({"error": "Invalid method."}, status=405)
 
 # Delete a leave request
+
 @csrf_exempt
 def delete_leave_request(request, id):
     """
@@ -113,11 +118,11 @@ def delete_leave_request(request, id):
 
 
 # List all leave requests
+
 def leave_request_list(request):
     leave_requests = LeaveRequest.objects.all()
     data = serialize('json', leave_requests)
     return JsonResponse({'leave_requests': data})
-
 
 def get_leave_requests(request):
     """
@@ -141,6 +146,8 @@ def get_leave_requests(request):
     ]
     return JsonResponse(data, safe=False)
 
+
+
 @csrf_exempt
 def approve_leave(request):
     if request.method == "POST":
@@ -155,6 +162,7 @@ def approve_leave(request):
             return JsonResponse({"error": "Leave request not found."}, status=404)
     return JsonResponse({"error": "Invalid request method."}, status=400)
 
+
 @csrf_exempt
 def deny_leave(request):
     if request.method == "POST":
@@ -168,3 +176,87 @@ def deny_leave(request):
         except LeaveRequest.DoesNotExist:
             return JsonResponse({"error": "Leave request not found."}, status=404)
     return JsonResponse({"error": "Invalid request method."}, status=400)
+
+
+
+def get_leave_count(request):
+    # Get the current date
+    current_date = now().date()
+
+    # Filter leaves where status is "Approved" and the current date falls within the leave range
+    leave_count = LeaveRequest.objects.filter(
+        status='Approved',
+        start_date__lte=current_date,
+        end_date__gte=current_date
+    ).count()
+
+    # Return the count as JSON response
+    return JsonResponse({'leave_count': leave_count})
+
+
+@csrf_exempt
+def add_leave_balance(request):
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+
+            # Extract data from request
+            E_id = data.get("E_id")
+            total_sick_leave = data.get("total_sick_leave", 0)
+            total_casual_leave = data.get("total_casual_leave", 0)
+            taken_sick_leave = data.get("taken_sick_leave", 0)
+            taken_casual_leave = data.get("taken_casual_leave", 0)
+
+            if not E_id:
+                return JsonResponse({"message": "Employee ID is required."}, status=400)
+
+            # Create or update the record
+            leave_balance, created = LeaveBalance.objects.get_or_create(E_id=E_id)
+            leave_balance.total_sick_leave = total_sick_leave
+            leave_balance.total_casual_leave = total_casual_leave
+            leave_balance.taken_sick_leave = taken_sick_leave
+            leave_balance.taken_casual_leave = taken_casual_leave
+
+            # Calculate and update the differences
+            difference_sick, difference_casual = calculate_leave_differences(
+                total_sick_leave, taken_sick_leave, total_casual_leave, taken_casual_leave
+            )
+            leave_balance.difference_sick = difference_sick
+            leave_balance.difference_casual = difference_casual
+
+            # Save the updated data
+            leave_balance.save()
+
+            message = "Leave balance added successfully." if created else "Leave balance updated successfully."
+            return JsonResponse({"message": message, "difference_sick": difference_sick, "difference_casual": difference_casual}, status=200)
+
+        except Exception as e:
+            return JsonResponse({"message": f"An error occurred: {str(e)}"}, status=500)
+
+    return JsonResponse({"message": "Invalid request method."}, status=400)
+
+
+
+def calculate_leave_differences(total_sick_leave, taken_sick_leave, total_casual_leave, taken_casual_leave):
+
+    difference_sick = total_sick_leave - taken_sick_leave
+    difference_casual = total_casual_leave - taken_casual_leave
+
+    return max(difference_sick, 0), max(difference_casual, 0)  # Ensure no negative values
+
+
+
+def get_leave_balances(request):
+    if request.method == "GET":
+        leave_balances = LeaveBalance.objects.all().values(
+            'E_id',
+            'total_sick_leave',
+            'total_casual_leave',
+            'taken_sick_leave',
+            'taken_casual_leave',
+            'difference_sick',
+            'difference_casual',
+            'others'
+        )
+        return JsonResponse(list(leave_balances), safe=False)
+    return JsonResponse({"message": "Invalid request method"}, status=400)

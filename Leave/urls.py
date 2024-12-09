@@ -10,4 +10,9 @@ urlpatterns = [
     path('get-leaves/', views.get_leave_requests, name='get_leave_requests'),
     path('approval/',views.approve_leave, name='approve_leave'),
     path('deny/', views.deny_leave, name='deny_leave'),
+    path('get-leave-count/', views.get_leave_count, name='get_leave_count'),
+    path('add-balance/', views.add_leave_balance, name='add-balance'),
+    path('calculate-difference/', views.calculate_leave_differences,name='calculate-difference'),
+    path('get-balance/', views.get_leave_balances, name='get-balance'),
+
 ]

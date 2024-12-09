@@ -4,14 +4,15 @@ from django.views.decorators.csrf import csrf_exempt
 from .models import *
 import json, logging
 from django.utils.crypto import get_random_string
-from datetime import datetime
+from datetime import datetime,timedelta
 from django.utils import timezone
 from django.core.mail import send_mail
 from Employee_Management import *
 from django.contrib.auth.hashers import check_password,make_password
 from django.conf import settings
 import random
-
+from django.core.exceptions import ObjectDoesNotExist
+from django.contrib.auth.decorators import login_required
 
 logger=logging.getLogger(__name__)
 # ------------------List all employees-------------------
@@ -172,7 +173,117 @@ def new_joiners(request):
 
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
-    
+
+
+# ------------------------to get user-details for profile -------------------
+
+def employee_detail_for_profile(request):
+    try:
+        email_id = request.GET.get('emailid')  # Only consider email
+
+        if not email_id:
+            return JsonResponse({'error': 'Email not provided'}, status=400)
+
+        # Fetch employee details based on email
+        employee = get_object_or_404(Employee, email=email_id)
+
+        # Prepare profile picture URL
+        profile_picture_url = None
+        if employee.profile_picture:
+            # If the employee has a profile picture, construct the full URL
+            profile_picture_url = settings.MEDIA_URL + str(employee.profile_picture)
+
+        # Serialize employee details
+        employee_data = {
+            'E_id': employee.E_id,
+            'first_name': employee.first_name,
+            'last_name': employee.last_name,
+            'email': employee.email,
+            'phone_number': employee.phone_number,
+            'age': employee.age,
+            'gender': employee.gender,
+            'Designation': employee.Designation,
+            'department': employee.department,
+            'date_of_birth': employee.date_of_birth,
+            'date_joined': employee.date_joined,
+            'profile_picture': profile_picture_url,  # Include profile picture URL
+        }
+
+        return JsonResponse(employee_data)
+
+    except ObjectDoesNotExist:
+        # Handle the case when no matching employee is found
+        return JsonResponse({'error': 'Employee not found'}, status=404)
+
+    except Exception as e:
+        # Handle unexpected exceptions
+        return JsonResponse({'error': f'An unexpected error occurred: {str(e)}'}, status=500)
+
+
+# ---------------------------allow loged-in user to edit some details----------
+
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from .models import Employee
+import json
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from .models import Employee
+import json
+from .decorators import *
+
+
+@csrf_exempt
+def update_employee_details_byLoginUser(request):
+    if request.method == 'GET':
+        # Fetch user details
+        email = request.GET.get('email')
+        if not email:
+            return JsonResponse({'error': 'Email is required'}, status=400)
+
+        employee = Employee.objects.filter(email=email).first()
+        if not employee:
+            return JsonResponse({'error': 'Employee not found'}, status=404)
+
+        return JsonResponse({
+            'first_name': employee.first_name,
+            'last_name': employee.last_name,
+            'phone_number': employee.phone_number,
+            'age': employee.age,
+            'date_of_birth': employee.date_of_birth.isoformat() if employee.date_of_birth else None,
+            'profile_picture': employee.profile_picture.url if employee.profile_picture and employee.profile_picture.name else None,
+        })
+
+    elif request.method == 'POST':
+        # Update user details
+        try:
+            email = request.POST.get('email')
+            if not email:
+                return JsonResponse({'error': 'Email is required'}, status=400)
+
+            employee = Employee.objects.filter(email=email).first()
+            if not employee:
+                return JsonResponse({'error': 'Employee not found'}, status=404)
+
+            # Update allowed fields
+            employee.first_name = request.POST.get('first_name', employee.first_name)
+            employee.last_name = request.POST.get('last_name', employee.last_name)
+            employee.phone_number = request.POST.get('phone_number', employee.phone_number)
+            employee.age = request.POST.get('age', employee.age)
+            employee.date_of_birth = request.POST.get('date_of_birth', employee.date_of_birth)
+
+            # Handle profile picture
+            if 'profile_picture' in request.FILES:
+                employee.profile_picture = request.FILES['profile_picture']
+
+            employee.save()
+            return JsonResponse({'message': 'Employee details updated successfully'})
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=400)
+
+    return JsonResponse({'error': 'Invalid request method'}, status=405)
+
+
 
 
 @csrf_exempt
@@ -201,6 +312,8 @@ def verify_email_and_send_otp(request):
     # Check if email exists in Employee table
     try:
         employee = Employee.objects.get(email=email)
+        print(employee.E_id)
+        print(employee)
     except Employee.DoesNotExist:
         return JsonResponse({"status": "error", "message": "User does not exist."}, status=404)
 
@@ -208,7 +321,7 @@ def verify_email_and_send_otp(request):
     otp = get_random_string(length=6, allowed_chars='0123456789')
 
     # Save the OTP and its creation time
-    login_details, created = LoginDetails.objects.get_or_create(employee_id=employee.id)
+    login_details, created = LoginDetails.objects.get_or_create(employee_id=employee.E_id)
     login_details.otp_code = otp
     login_details.otp_created_at = timezone.now()
     login_details.save()
@@ -216,8 +329,8 @@ def verify_email_and_send_otp(request):
     # Send the OTP to the email
     try:
         send_mail(
-            subject="Your OTP Code",
-            message=f"Here is your OTP code: {otp}.",
+            subject="Confirmation OTP UGyan",
+            message=f"A sign in attempt requires further verification because we did not recognize your device.\nTo complete the sign in, enter the verification code on the unrecognized device. \n\n Verification code : {otp}.",
             from_email=settings.EMAIL_HOST_USER,
             recipient_list=[email],
             fail_silently=False,
@@ -226,7 +339,6 @@ def verify_email_and_send_otp(request):
         return JsonResponse({"status": "error", "message": f"Failed to send OTP. Error: {e}"}, status=500)
 
     return JsonResponse({"status": "success", "message": "OTP has been sent to your email."}, status=200)
-
 
 
 @csrf_exempt
@@ -276,7 +388,7 @@ def verify_otp(request):
 
     
     
-    
+ 
 @csrf_exempt
 def resend_otp(request):
     # Check for valid content type
@@ -328,8 +440,8 @@ def generate_otp():
 def send_otp_email(email, otp):
     """Send the OTP to the user's email."""
     from django.core.mail import send_mail
-    subject = "Your OTP Code"
-    message = f"Your OTP code is {otp}. It will expire in 5 minutes."
+    subject = "Another Attempt of OTP UGyan"
+    message = f"A sign in attempt requires further verification because we did not recognize your device.\nTo complete the sign in, enter the verification code on the unrecognized device. \n\n Verification code :{otp}"
     from_email = settings.EMAIL_HOST_USER  # Replace with your sender email
     send_mail(subject, message, from_email, [email])
 
@@ -378,6 +490,9 @@ def change_password(request):
         # Update the login details
         login_details.change_password_attempts += 1
         login_details.change_password_attempts_date = timezone.now()
+
+        expiration_time=timezone.now()+timedelta(seconds=otp_valid_duration)
+        login_details.otp_expiration_time=expiration_time
         login_details.save()
 
         return JsonResponse({"status": "success", "message": "Password updated successfully."}, status=200)
@@ -385,7 +500,8 @@ def change_password(request):
         return JsonResponse({"status": "error", "message": "Failed to reset password. Please try again."}, status=500)
 
 
-
+# ----------------------login--------------------------
+from .decorators import *
 
 
 @csrf_exempt
@@ -393,6 +509,7 @@ def login(request):
     if request.method != 'POST':
         return JsonResponse({"status": "error", "message": "Invalid request method. Use POST."}, status=405)
 
+    # Parse JSON input
     try:
         data = json.loads(request.body)
         username = data.get("username")
@@ -400,15 +517,42 @@ def login(request):
     except json.JSONDecodeError:
         return JsonResponse({"status": "error", "message": "Invalid JSON format."}, status=400)
 
+    # Validate username and password
     if not username or not password:
         return JsonResponse({"status": "error", "message": "Username and password are required."}, status=400)
 
     try:
-        employee = Employee.objects.get(email=username)  # Assuming username is the email
+        # Assuming username is the email field
+        employee = Employee.objects.get(email=username)
     except Employee.DoesNotExist:
         return JsonResponse({"status": "error", "message": "Invalid username or password."}, status=401)
 
+    # Check password
     if check_password(password, employee.password):
-        return JsonResponse({"status": "success", "message": "Login successful."}, status=200)
+        # Determine role
+        role = None
+        if employee.is_emp:
+            role = 'employee'
+        elif employee.is_HR:
+            role = 'HR'
+        elif employee.is_admin:
+            role = 'admin'
+
+        # Store user data in session
+        request.session['is_logged_in'] = True
+        request.session['user_id'] = employee.E_id
+        request.session['user_role'] = 'employee' if employee.is_emp else 'HR' if employee.is_HR else 'admin'
+
+        user_data = {
+            "id": employee.E_id,
+            "first_name": employee.first_name,
+            "last_name": employee.last_name,
+            "email": employee.email,
+            "role": role,
+        }
+
+        logger.info(f"Login successful: {username} - Role: {role}")
+        
+        return JsonResponse({"status": "success", "message": "Login successful.", "data": user_data}, status=200)
     else:
         return JsonResponse({"status": "error", "message": "Invalid username or password."}, status=401)

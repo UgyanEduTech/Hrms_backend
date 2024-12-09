@@ -3,7 +3,9 @@ from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from .models import Holiday
 import json
+from .decorators import *
 
+@login_required_session
 def get_holidays(request):
     holidays = Holiday.objects.all()
     holidays_data = [
@@ -22,6 +24,7 @@ from datetime import datetime
 from .models import Holiday
 import json
 
+@login_required_session
 @csrf_exempt
 def add_holiday(request):
     if request.method == 'POST':
@@ -65,6 +68,7 @@ def add_holiday(request):
 # from .models import Holiday
 # import json
 
+@login_required_session
 @csrf_exempt
 def delete_holiday(request, holiday_id):  # Get the holiday_id from URL
     if request.method == 'DELETE':

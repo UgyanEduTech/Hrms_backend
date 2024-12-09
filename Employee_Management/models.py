@@ -18,6 +18,12 @@ class Employee(models.Model):
     is_HR = models.BooleanField(default=False)
     is_admin = models.BooleanField(default=False)
     password=models.CharField(max_length=255,null=True)
+    profile_picture = models.ImageField(
+        upload_to='employee_pics/',  # This will store images in media/employee_pics
+        default='employee_pics/default.png',  # Default image if not provided
+        null=True, 
+        blank=True
+    )
 
 
 class LoginDetails(models.Model):
@@ -30,4 +36,5 @@ class LoginDetails(models.Model):
     otp_verified = models.BooleanField(default=False)
     change_password_attempts = models.IntegerField(default=0)
     change_password_attempts_date = models.DateTimeField(null=True, blank=True)
+    otp_expiration_time=models.DateTimeField(blank=True,null=True)
 

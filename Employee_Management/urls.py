@@ -14,4 +14,7 @@ urlpatterns = [
     path('resend-otp/', views.resend_otp, name='resend_otp'),
     path('change-password/', views.change_password, name='change_password'),
     path('login/', views.login, name='login'),
+    path('getprofile/', views.employee_detail_for_profile, name='profile'),
+    path('update-by-login/',views. update_employee_details_byLoginUser, name='update_employee'),
+
 ]

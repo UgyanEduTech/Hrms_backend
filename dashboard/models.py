@@ -4,13 +4,13 @@ from django.utils.timezone import now
 
 
 class ClockInOut(models.Model):
-      E_id=models.AutoField(primary_key=True)
-      login_time=models.DateTimeField(default=timezone.now)
-      logout_time=models.DateTimeField(null=True,blank=True)
-      shift_end_time = models.DateTimeField(null=True, blank=True)
-      date=models.DateField(default=timezone.now)
-      login_attempts=models.PositiveIntegerField(default=0)
-      reset_attempts=models.PositiveIntegerField(default=0)
+    E_id = models.CharField(max_length=12)
+    login_time = models.DateTimeField(default=timezone.now)
+    logout_time = models.DateTimeField(null=True, blank=True)
+    shift_end_time = models.DateTimeField(null=True, blank=True)
+    date = models.DateField(default=timezone.now)
+    login_attempts = models.PositiveIntegerField(default=0)
+    reset_attempts = models.PositiveIntegerField(default=0)
 
 class MonthlyTarget(models.Model):
       target_id=models.AutoField(primary_key=True)

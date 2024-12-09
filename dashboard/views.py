@@ -8,125 +8,237 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 import logging
 from datetime import datetime
+from .decorators import *
+from calendar import monthrange
 
 # Set up logging
 logger = logging.getLogger(__name__)
 
+
+@csrf_exempt
 def clock_in_view(request):
-    employee_id = request.GET.get('id')
-    
-    # Get or create ClockInOut object
-    clock_entry, created = ClockInOut.objects.get_or_create(
-        E_id=employee_id,
-        date=timezone.now().date()
-    )
-    
-    # Check if already clocked in
-    if not created and clock_entry.login_time.date() == timezone.now().date():
-        return JsonResponse({"status": "failed", "message": "Already clocked in today."})
-    
-    # Set login time and shift end time
-    clock_entry.login_time = timezone.now()
-    clock_entry.shift_end_time = clock_entry.login_time + timedelta(hours=8)
-    clock_entry.login_attempts += 1
-    clock_entry.logout_time = None  # Explicitly clear logout_time in case it was set accidentally
-    clock_entry.save()
+    if request.method != 'POST':
+        return JsonResponse({"status": "failed", "message": "Only POST method is allowed."}, status=405)
 
-    return JsonResponse({
-        "status": "success",
-        "message": "Clock-in successful.",
-        "login_time": clock_entry.login_time,
-        "shift_end_time": clock_entry.shift_end_time
-    })
+    try:
+        # Parse the JSON body
+        body = json.loads(request.body)
+        E_id = body.get('E_id')
 
-# def clock_out_view(request):
-#     employee_id = request.GET.get('id')
-#     clock_entry = get_object_or_404(ClockInOut, E_id=employee_id, date=timezone.now().date())
+        # Check if E_id is provided
+        if not E_id:
+            return JsonResponse({"status": "failed", "message": "Employee ID (E_id) is required."}, status=400)
 
-#     # Check if the employee has already checked out today
-#     if clock_entry.logout_time and clock_entry.logout_time.date() == timezone.now().date():
-#         return JsonResponse({"status": "failed", "message": "Already checked out today."})
+        print(f"Employee ID in Clock-in: {E_id}")
 
-#     # Check if the employee has clocked in
-#     if not clock_entry.login_time or clock_entry.login_time.date() != timezone.now().date():
-#         return JsonResponse({"status": "failed", "message": "Cannot check out without clocking in first."})
+        # Get or create ClockInOut object for today
+        clock_entry, created = ClockInOut.objects.get_or_create(
+            E_id=E_id,
+            date=timezone.now().date()
+        )
 
-#     # Ensure the 8-hour shift timer has ended
-#     now = timezone.now()
-#     if now < clock_entry.shift_end_time:
-#         remaining_time = clock_entry.shift_end_time - now
-#         hours, remainder = divmod(remaining_time.total_seconds(), 3600)
-#         minutes, seconds = divmod(remainder, 60)
-#         remaining_time_str = f"{int(hours)}:{int(minutes):02}:{int(seconds):02}"
-#         return JsonResponse({
-#             "status": "failed",
-#             "message": f"You cannot clock out until the shift ends. Remaining time: {remaining_time_str}"
-#         })
+        if created or clock_entry.login_time is None:
+            # First time clock-in for the day
+            clock_entry.login_time = timezone.now()
+            clock_entry.shift_end_time = clock_entry.login_time + timedelta(hours=8)
+            clock_entry.logout_time = None
+            clock_entry.login_attempts += 1
+            clock_entry.save()
 
-#     # Record the current time as the logout time
-#     clock_entry.logout_time = now
-#     clock_entry.save()
+            return JsonResponse({
+                "status": "success",
+                "message": "Clock-in successful.",
+                "login_time": clock_entry.login_time.strftime('%Y-%m-%d %H:%M:%S'),
+                "shift_end_time": clock_entry.shift_end_time.strftime('%Y-%m-%d %H:%M:%S'),
+                "login_attempts": clock_entry.login_attempts,
+            }, status=200)
 
-#     return JsonResponse({"status": "success", "message": "Check-out successful.", "logout_time": clock_entry.logout_time})
+        else:
+            # Already clocked in today
+            if not clock_entry.shift_end_time:
+                # Ensure shift_end_time is set if missing
+                clock_entry.shift_end_time = clock_entry.login_time + timedelta(hours=8)
 
+            clock_entry.login_attempts += 1
+            clock_entry.save()
+
+            return JsonResponse({
+                "status": "info",
+                "message": "Already clocked in today.",
+                "login_time": clock_entry.login_time.strftime('%Y-%m-%d %H:%M:%S'),
+                "shift_end_time": clock_entry.shift_end_time.strftime('%Y-%m-%d %H:%M:%S'),
+                "login_attempts": clock_entry.login_attempts,
+            }, status=200)
+
+    except Exception as e:
+        print(f"Error during clock-in: {e}")
+        return JsonResponse({"status": "failed", "message": f"An error occurred during clock-in. Error: {str(e)}"}, status=500)
+
+
+@csrf_exempt
 def clock_out_view(request):
-    employee_id = request.GET.get('id')
-    
-    if not employee_id:
-        return JsonResponse({"status": "failed", "message": "Employee ID is required."})
+    if request.method != 'POST':
+        return JsonResponse({"status": "failed", "message": "Only POST method is allowed."}, status=405)
 
-    # Try to get the ClockInOut object for today; return a friendly message if it doesn't exist
-    clock_entry = ClockInOut.objects.filter(E_id=employee_id, date=timezone.now().date()).first()
-    if not clock_entry:
-        return JsonResponse({"status": "failed", "message": "No clock-in entry found for today."})
+    try:
+        # Parse the JSON body
+        body = json.loads(request.body)
+        E_id = body.get('E_id')
 
-    # Check if the employee has already checked out today
-    if clock_entry.logout_time and clock_entry.logout_time.date() == timezone.now().date():
-        return JsonResponse({"status": "failed", "message": "Already checked out today."})
+        # Check if E_id is provided
+        if not E_id:
+            return JsonResponse({"status": "failed", "message": "Employee ID (E_id) is required."}, status=400)
 
-    # Check if the employee clocked in today
-    if not clock_entry.login_time or clock_entry.login_time.date() != timezone.now().date():
-        return JsonResponse({"status": "failed", "message": "Cannot check out without clocking in first."})
+        # Try to get the ClockInOut object for today
+        clock_entry = ClockInOut.objects.filter(E_id=E_id, date=now().date()).first()
+        if not clock_entry:
+            return JsonResponse({"status": "failed", "message": "No clock-in entry found for today."}, status=200)
 
-    # Enforce minimum working hours restriction
-    required_working_time = timedelta(hours=int(clock_entry.working_hours or 8))  # Default to 8 hours if None
-    actual_working_time = timezone.now() - clock_entry.login_time
-    remaining_time = required_working_time - actual_working_time
-    
-    # Logging for debugging purposes
-    logger.info(f"Employee {employee_id} working time info:")
-    logger.info(f"  - Required working time: {required_working_time}")
-    logger.info(f"  - Actual working time: {actual_working_time}")
-    logger.info(f"  - Remaining time to complete required hours: {remaining_time}")
+        # Check if the employee has already checked out
+        if clock_entry.logout_time:
+            return JsonResponse({
+                "status": "success",
+                "message": "Already checked out today.",
+                "logout_time": clock_entry.logout_time.strftime('%Y-%m-%d %H:%M:%S')
+            }, status=200)
 
-    if actual_working_time < required_working_time:
-        logger.info(f"Employee {employee_id} cannot check out yet. Needs {remaining_time} more.")
+        # Check if the employee clocked in today
+        if not clock_entry.login_time:
+            return JsonResponse({"status": "success", "message": "Cannot check out without clocking in first."}, status=200)
+
+        # Enforce minimum working hours restriction
+        required_working_time = timedelta(hours=8)
+        actual_working_time = now() - clock_entry.login_time
+        remaining_time = required_working_time - actual_working_time
+
+        if actual_working_time < required_working_time:
+            # Calculate the expected logout time
+            expected_logout_time = clock_entry.login_time + required_working_time
+            return JsonResponse({
+                "status": "success",
+                "message": f"Cannot log out yet. You need to work {remaining_time} more to complete your working hours.",
+                "logout_time": expected_logout_time.strftime('%Y-%m-%d %H:%M:%S')
+            }, status=200)
+
+        # If 8 hours have passed, record the logout time automatically
+        clock_entry.logout_time = now()
+        clock_entry.save()
+
         return JsonResponse({
-            "status": "failed",
-            "message": f"Cannot log out yet. You need to work {remaining_time} more to complete your working hours."
-        })
+            "status": "success",
+            "message": "Logout successful.",
+            "logout_time": clock_entry.logout_time.strftime('%Y-%m-%d %H:%M:%S')
+        }, status=200)
 
-    # Record the current time as the logout time
-    clock_entry.logout_time = timezone.now()
-    clock_entry.save()
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "failed", "message": "Invalid JSON format."}, status=400)
+    except Exception as e:
+        print(f"Error during clock-out: {e}")
+        return JsonResponse({"status": "failed", "message": "An error occurred during clock-out."}, status=500)
 
-    logger.info(f"Employee {employee_id} clocked out at {clock_entry.logout_time}")
 
-    return JsonResponse({"status": "success", "message": "Check-out successful.", "logout_time": clock_entry.logout_time})
-
+@csrf_exempt
 def reset_login_attempts_view(request):
-    # Get or create a ClockInOut object for the specified employee ID
-    clock_entry, created = ClockInOut.objects.get_or_create(
-        E_id=request.GET.get('id'),
-        date=timezone.now().date()
-    )
+    if request.method != 'POST':
+        return JsonResponse({"status": "error", "message": "Only POST method is allowed."}, status=405)
+    
+    try:
+        # Parse the JSON body
+        print(f"Request body: {request.body}")  # Log raw request body for debugging
+        body = json.loads(request.body)
+        
+        employee_id = body.get('E_id')  # Retrieve E_id from the request body
+        print(f"Employee ID: {employee_id}")  # Log E_id to see if it's coming correctly
+        
+        # Check if E_id is provided
+        if not employee_id:
+            return JsonResponse({"status": "error", "message": "Employee ID (E_id) is required."}, status=400)
+        
+        # Get or create a ClockInOut entry for today
+        today = timezone.now().date()
+        clock_entry, created = ClockInOut.objects.get_or_create(E_id=employee_id, date=today)
+        
+        # Check if the reset attempts limit has been reached
+        if clock_entry.reset_attempts >= 3:
+            return JsonResponse({
+                "status": "error",
+                "message": "Reset attempts limit reached for today. Only 3 resets are allowed per day.",
+            }, status=403)
 
-    # Reset login attempts and increment reset attempts
-    clock_entry.login_attempts = 0
-    clock_entry.reset_attempts += 1
-    clock_entry.save()
+        # Reset login attempts and increment reset attempts count
+        clock_entry.login_attempts = 0
+        clock_entry.reset_attempts += 1
+        clock_entry.save()
 
-    return JsonResponse({"status": "success", "message": "Login attempts reset.", "reset_attempts": clock_entry.reset_attempts})
+        return JsonResponse({
+            "status": "success",
+            "message": "Login attempts have been reset.",
+            "remaining_resets": 3 - clock_entry.reset_attempts,
+            "reset_attempts_used": clock_entry.reset_attempts
+        }, status=200)
+    
+    except json.JSONDecodeError:
+        return JsonResponse({"status": "error", "message": "Invalid JSON format."}, status=400)
+    except Exception as e:
+        print(f"Error during reset: {e}")
+        return JsonResponse({"status": "error", "message": "An error occurred during reset."}, status=500)
+    
+
+
+
+@csrf_exempt
+def get_clock_in_out_data(request):
+    if request.method == 'POST':
+        try:
+            # Load data from the body of the request
+            data = json.loads(request.body)
+            E_id = data.get('E_id')  # Use 'E_id' as the key in the JSON body
+            
+            # Ensure 'E_id' is provided
+            if not E_id:
+                return JsonResponse({'error': 'E_id is required'}, status=400)
+
+            # Get the current date to filter data for the current month
+            current_date = timezone.now()
+            start_of_month = current_date.replace(day=1)
+
+            # Calculate the last day of the current month
+            last_day_of_month = monthrange(current_date.year, current_date.month)[1]
+            end_of_month = current_date.replace(day=last_day_of_month)
+
+            # Query clock-in/out data for the employee within the current month
+            clock_data = ClockInOut.objects.filter(
+                E_id=E_id,  # Directly filter by 'E_id' field in ClockInOut
+                date__gte=start_of_month.date(),
+                date__lte=end_of_month.date()
+            )
+
+            # Prepare data to send as JSON
+            response_data = []
+            for record in clock_data:
+                response_data.append({
+                    'date': record.date,
+                    'login_time': record.login_time.strftime('%Y-%m-%d %H:%M:%S'),
+                    'logout_time': record.logout_time.strftime('%Y-%m-%d %H:%M:%S') if record.logout_time else '',
+                    'shift_end_time': record.shift_end_time.strftime('%Y-%m-%d %H:%M:%S') if record.shift_end_time else '',
+                    'login_attempts': record.login_attempts,
+                    'reset_attempts': record.reset_attempts,
+                })
+
+            return JsonResponse(response_data, safe=False)
+
+        except json.JSONDecodeError:
+            return JsonResponse({'error': 'Invalid JSON in request body'}, status=400)
+        except Exception as e:
+            return JsonResponse({'error': str(e)}, status=500)
+    
+    else:
+        return JsonResponse({'error': 'Invalid request method. Use POST.'}, status=405)
+
+
+
+
+
 
 def timer_view(request):
     employee_id = request.GET.get('id')
@@ -153,175 +265,6 @@ def timer_view(request):
         "remaining_time": remaining_time_str,
         "shift_end_time": clock_entry.shift_end_time
     })
-
-def track_monthly_targets(request):
-   
-    emp_id = request.GET.get('emp_id') 
-
-    if not emp_id:
-        return JsonResponse({
-            "status": "error",
-            "message": "Employee ID (emp_id) is required."
-        })
-
-    try:
-        # Fetch all targets for the given employee ID
-        employee_targets = MonthlyTarget.objects.filter(emp_id=emp_id)
-
-        if not employee_targets.exists():
-            return JsonResponse({
-                "status": "error",
-                "message": f"No targets found for employee ID: {emp_id}."
-            })
-
-        # Counters for status tracking
-        status_summary = {"Pending": 0, "Achieved": 0, "Exceeded": 0}
-        updated_targets = []
-
-        for target in employee_targets:
-            # Calculate the difference
-            target.difference = target.actual_value - target.target_value
-
-            if target.difference > 0:
-                target.status = "Pending"
-            elif target.difference == 0:
-                target.status = "Achieved"
-            else: 
-                target.status = "Exceeded"
-
-            # Save the updated target
-            target.updated_at = now()
-            target.save()
-
-            # Update status counters
-            status_summary[target.status] += 1
-
-            # Collect updated target info
-            updated_targets.append({
-                "target_id": target.target_id,
-                "emp_id": target.emp_id,
-                "month": target.month,
-                "year": target.year,
-                "difference": target.difference,
-                "status": target.status,
-            })
-
-        return JsonResponse({
-            "status": "success",
-            "message": f"Monthly targets tracked successfully for employee ID: {emp_id}.",
-            "status_summary": status_summary,
-            "updated_targets": updated_targets,
-        })
-
-    except Exception as e:
-        # Handle unexpected errors
-        return JsonResponse({
-            "status": "error",
-            "message": f"An unexpected error occurred: {str(e)}"
-        })
-
-@csrf_exempt
-def add_monthly_target(request):
-    if request.method == "POST":
-        try:
-            # Parse JSON data from the request body
-            data = json.loads(request.body.decode("utf-8"))
-            
-            # Retrieve fields with default values for missing data
-            month = data.get("month")
-            year = data.get("year")
-            target_value = data.get("target_value")
-            actual_value = data.get("actual_value", 0.0) 
-            status = data.get("status")
-            emp_id = data.get("emp_id")
-
-            # Check for required fields
-            if not month or year is None or target_value is None or not status or not emp_id:
-                return JsonResponse({
-                    "status": "error",
-                    "message": "Fields (month, year, target_value, status, emp_id) are required and cannot be null."
-                })
-
-            # Ensure year and target_value are integers
-            year = int(year)
-            target_value = float(target_value)
-
-            # Calculate the difference if not explicitly provided
-            difference = data.get("difference", target_value - actual_value)
-
-            # Create the MonthlyTarget record
-            monthly_target = MonthlyTarget.objects.create(
-                month=month,
-                year=year,
-                target_value=target_value,
-                actual_value=actual_value,
-                difference=difference,
-                status=status,
-                emp_id=emp_id
-            )
-
-            return JsonResponse({
-                "status": "success",
-                "message": "Monthly target added successfully.",
-                "target_id": monthly_target.target_id
-            })
-        except ValueError as ve:
-            return JsonResponse({"status": "error", "message": f"Invalid data type: {str(ve)}"})
-        except Exception as e:
-            return JsonResponse({"status": "error", "message": f"An error occurred: {str(e)}"})
-    else:
-        return JsonResponse({"status": "error", "message": "Invalid request method. Use POST."})
-
-@csrf_exempt
-def update_monthly_target(request):
-    if request.method == "POST":
-        try:
-            # Parse JSON data
-            data = json.loads(request.body.decode("utf-8"))
-
-            # Extract target_id
-            target_id = data.get("target_id")
-            if not target_id:
-                return JsonResponse({"status": "error", "message": "Field 'target_id' is required."})
-
-            # Get the existing record
-            monthly_target = MonthlyTarget.objects.filter(target_id=target_id).first()
-            if not monthly_target:
-                return JsonResponse({"status": "error", "message": f"Target with ID {target_id} does not exist."})
-
-            # Update fields if provided
-            if "month" in data:
-                monthly_target.month = data["month"]
-            if "year" in data:
-                monthly_target.year = int(data["year"])
-            if "target_value" in data:
-                monthly_target.target_value = float(data["target_value"])
-            if "actual_value" in data:
-                monthly_target.actual_value = float(data["actual_value"])
-            if "difference" in data:
-                monthly_target.difference = float(data["difference"])
-            else:
-                # Calculate difference automatically if not provided
-                monthly_target.difference = monthly_target.target_value - monthly_target.actual_value
-            if "status" in data:
-                monthly_target.status = data["status"]
-            if "emp_id" in data:
-                monthly_target.emp_id = data["emp_id"]
-
-            # Save the updated record
-            monthly_target.save()
-
-            return JsonResponse({
-                "status": "success",
-                "message": "Monthly target updated successfully.",
-                "updated_target_id": monthly_target.target_id
-            })
-        except ValueError as ve:
-            return JsonResponse({"status": "error", "message": f"Invalid data type: {str(ve)}"})
-        except Exception as e:
-            return JsonResponse({"status": "error", "message": f"An unexpected error occurred: {str(e)}"})
-    else:
-        return JsonResponse({"status": "error", "message": "Invalid request method. Use POST."})
 
 
 def check_reminders_view(request):
@@ -423,6 +366,8 @@ def save_message(request):
     return JsonResponse({'error': 'Invalid request method'}, status=405)
 
 
+
+@csrf_exempt
 def get_messages(request):
     one_month_ago = datetime.now() - timedelta(days=30)
     messages = Message.objects.filter(timestamp__gte=one_month_ago).order_by('-timestamp')  # Order by timestamp descending
@@ -433,6 +378,104 @@ def get_messages(request):
             'text': msg.text,
             'timestamp': msg.timestamp.strftime('%Y-%m-%d %I:%M:%S %p')  # Format in 12-hour format
         })
-    
     return JsonResponse({'messages': message_list})
 
+
+
+@csrf_exempt
+def add_monthly_target(request):
+    if request.method == "POST":
+        emp_id = request.GET.get('emp_ID')
+        try:
+            data = json.loads(request.body.decode("utf-8"))
+            month = data.get("month")
+            year = data.get("year")
+            target_value = data.get("target_value", 0.0)
+            actual_value = data.get("actual_value", 0.0)
+            status = data.get("status", "Pending")
+            difference = int(target_value) -int(actual_value)
+
+            if not month or not year or not target_value or not actual_value:
+                return JsonResponse({"status": "error", "message": "Missing required fields."}, status=400)
+
+            monthly_target = MonthlyTarget.objects.create(
+                emp_id=emp_id,
+                month=month,
+                year=year,
+                target_value=target_value,
+                actual_value=actual_value,
+                difference=difference,
+                status=status
+            )
+            return JsonResponse({"status": "success", "message": "Monthly target added successfully."}, status=201)
+
+        except Exception as e:
+            print("exec in add target",e)
+            return JsonResponse({"status": "error", "message": str(e)}, status=500)
+
+    return JsonResponse({"status": "error", "message": "Invalid request method."}, status=405)
+
+# Update a monthly target
+@csrf_exempt
+def update_monthly_target(request):
+    if request.method == "PUT":
+        emp_id = request.GET.get('emp_ID')
+        try:
+            print("inside try")
+            data = json.loads(request.body.decode("utf-8"))
+            # Fetch the target using empId instead of target_id
+            target = MonthlyTarget.objects.get(emp_id=emp_id)
+
+            # Update the target fields
+            target.target_value = data.get("target_value", target.target_value)
+            target.actual_value = data.get("actual_value", target.actual_value)
+            target.difference = int(target.target_value) - int(target.actual_value)
+            target.save()
+
+            return JsonResponse({"status": "success", "message": "Monthly target updated successfully."}, status=200)
+
+        except MonthlyTarget.DoesNotExist:
+            return JsonResponse({"status": "error", "message": "Target not found."}, status=404)
+        except Exception as e:
+            print("exec in updatre target",e)
+            return JsonResponse({"status": "error", "message": str(e)}, status=500)
+
+    return JsonResponse({"status": "error", "message": "Invalid request method."}, status=405)
+
+# Reset targets on the 1st of each month
+def reset_monthly_targets():
+    current_month = now().strftime("%B")
+    current_year = now().year
+    MonthlyTarget.objects.filter(month=current_month, year=current_year).update(
+        target_value=0, actual_value=0, difference=0, status="Pending"
+    )
+
+
+@csrf_exempt
+def get_monthly_target(request):
+    current_month = now().strftime("%B")  # Full month name (e.g., "December")
+    current_year = now().year
+
+    # Log all query parameters
+    logger.info(f"Request query parameters: {request.GET}")
+
+    # Fetch the emp_id using the correct query parameter name
+    emp_id = request.GET.get("empId")  # Match the front-end parameter name
+    logger.info(f"Fetching target for emp_id={emp_id}, month={current_month}, year={current_year}")
+
+    try:
+        # Use __iexact for case-insensitive comparison
+        target = MonthlyTarget.objects.get(month__iexact=current_month, year=current_year, emp_id=emp_id)
+        logger.info(f"Target found: {target}")
+        return JsonResponse({
+            "target_id": target.target_id,
+            "month": target.month,
+            "year": target.year,
+            "target_value": target.target_value,
+            "actual_value": target.actual_value,
+            "difference": target.difference,
+            "status": target.status
+        })
+    except MonthlyTarget.DoesNotExist:
+        logger.warning(f"No target found for emp_id={emp_id}, month={current_month}, year={current_year}")
+        return JsonResponse({"message": "No target found for this month."}, status=404)

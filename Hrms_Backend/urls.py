@@ -18,11 +18,13 @@ from django.contrib import admin
 from django.urls import path,include
 import Employee_Management.urls
 import Calender.urls
+from django.conf import settings
+from django.conf.urls.static import static
 
-urlpatterns = [
+urlpatterns = [ 
     path("admin/", admin.site.urls),
     path("employees/",include('Employee_Management.urls')),
     path("dashboard/",include('dashboard.urls')),
     path("calender/",include('Calender.urls')),
     path("leave/",include('Leave.urls')),
-]
+] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

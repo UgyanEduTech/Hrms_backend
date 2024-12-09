@@ -142,3 +142,9 @@ EMAIL_PORT = 587
 EMAIL_USE_TLS = True
 EMAIL_HOST_USER =  'danishsparkydt@gmail.com'      #'nandini.thakellapti@gmail.com'
 EMAIL_HOST_PASSWORD = "imry cpho lmdx mpbf"
+
+# settings.py
+
+# Media files settings
+MEDIA_URL = '/media/'  # URL path to access media files in the browser
+MEDIA_ROOT = BASE_DIR / 'media'  # The physical location where media files are stored
