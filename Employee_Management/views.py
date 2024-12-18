@@ -284,53 +284,41 @@ def update_employee_details_byLoginUser(request):
     return JsonResponse({'error': 'Invalid request method'}, status=405)
 
 
-
-
 @csrf_exempt
 def verify_email_and_send_otp(request):
-    # Initialize variables
-    email = None
-
-    # Handle JSON payload
     if request.content_type == "application/json":
         try:
             data = json.loads(request.body)
             email = data.get("email")
         except json.JSONDecodeError:
             return JsonResponse({"status": "error", "message": "Invalid JSON format."}, status=400)
-
-    # Handle form-data payload
-    elif request.content_type == "application/x-www-form-urlencoded" or request.content_type.startswith("multipart/form-data"):
+    elif request.content_type.startswith("multipart/form-data") or request.content_type == "application/x-www-form-urlencoded":
         email = request.POST.get("email")
-
     else:
-        return JsonResponse({"status": "error", "message": "Unsupported content type. Use JSON or form-data."}, status=400)
+        return JsonResponse({"status": "error", "message": "Unsupported content type."}, status=400)
 
     if not email:
         return JsonResponse({"status": "error", "message": "Email is required."}, status=400)
 
-    # Check if email exists in Employee table
+    # Check if email exists
     try:
         employee = Employee.objects.get(email=email)
-        print(employee.E_id)
-        print(employee)
     except Employee.DoesNotExist:
         return JsonResponse({"status": "error", "message": "User does not exist."}, status=404)
 
-    # Generate a 6-digit OTP
+    # Generate OTP and save login details
     otp = get_random_string(length=6, allowed_chars='0123456789')
-
-    # Save the OTP and its creation time
-    login_details, created = LoginDetails.objects.get_or_create(employee_id=employee.E_id)
+    login_details, created = LoginDetails.objects.get_or_create(employee_id=employee.id)
     login_details.otp_code = otp
     login_details.otp_created_at = timezone.now()
+    login_details.otp_verified = False  # Reset OTP verified status
     login_details.save()
 
-    # Send the OTP to the email
+    # Send email with OTP
     try:
         send_mail(
-            subject="Confirmation OTP UGyan",
-            message=f"A sign in attempt requires further verification because we did not recognize your device.\nTo complete the sign in, enter the verification code on the unrecognized device. \n\n Verification code : {otp}.",
+            subject="Confirm OTP UGYAN",
+            message=f"A sign-in attempt requires further verification because we did not recognize your device. \nTo complete the sign-in, Enter the verification code on the unrecognized device. \n\nVerification code: {otp}",
             from_email=settings.EMAIL_HOST_USER,
             recipient_list=[email],
             fail_silently=False,
@@ -340,14 +328,8 @@ def verify_email_and_send_otp(request):
 
     return JsonResponse({"status": "success", "message": "OTP has been sent to your email."}, status=200)
 
-
 @csrf_exempt
 def verify_otp(request):
-    # Initialize variables
-    email = None
-    otp = None
-
-    # Handle JSON payload
     if request.content_type == "application/json":
         try:
             data = json.loads(request.body)
@@ -355,13 +337,11 @@ def verify_otp(request):
             otp = data.get("otp")
         except json.JSONDecodeError:
             return JsonResponse({"status": "error", "message": "Invalid JSON format."}, status=400)
-
-    # Handle form-data payload
-    elif request.content_type == "application/x-www-form-urlencoded" or request.content_type.startswith("multipart/form-data"):
+    elif request.content_type.startswith("multipart/form-data") or request.content_type == "application/x-www-form-urlencoded":
         email = request.POST.get("email")
         otp = request.POST.get("otp")
     else:
-        return JsonResponse({"status": "error", "message": "Unsupported content type. Use JSON or form-data."}, status=400)
+        return JsonResponse({"status": "error", "message": "Unsupported content type."}, status=400)
 
     if not email or not otp:
         return JsonResponse({"status": "error", "message": "Email and OTP are required."}, status=400)
@@ -372,21 +352,28 @@ def verify_otp(request):
     except (Employee.DoesNotExist, LoginDetails.DoesNotExist):
         return JsonResponse({"status": "error", "message": "User or login details not found."}, status=404)
 
-    # Check if the OTP matches and is valid
+    # Debug logs
+    print(f"Email: {email}")
+    print(f"OTP: {otp}")
+    print(f"Employee: {employee}")
+    print(f"Login Details: {login_details}")
+    print(f"OTP Created At: {login_details.otp_created_at}")
+    print(f"Time Now: {timezone.now()}")
+
+    # Validate OTP
     time_diff = timezone.now() - login_details.otp_created_at
     otp_valid_duration = 300  # 5 minutes
-    if login_details.otp_code == otp and time_diff.total_seconds() < otp_valid_duration:
-        # OTP is valid, so mark it as verified and update the details
-        login_details.otp_verified = True  # Mark OTP as verified
-        login_details.save()  # Save changes to the database
+    print(f"Time Difference (seconds): {time_diff.total_seconds()}")
 
+    if login_details.otp_code == otp and time_diff.total_seconds() < otp_valid_duration:
+        login_details.otp_verified = True
+        login_details.save()
         return JsonResponse({"status": "success", "message": "OTP verified successfully."}, status=200)
     elif time_diff.total_seconds() >= otp_valid_duration:
         return JsonResponse({"status": "error", "message": "OTP has expired. Please request a new OTP."}, status=400)
     else:
         return JsonResponse({"status": "error", "message": "Invalid OTP."}, status=400)
 
-    
     
  
 @csrf_exempt

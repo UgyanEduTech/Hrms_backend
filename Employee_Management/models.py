@@ -28,7 +28,7 @@ class Employee(models.Model):
 
 class LoginDetails(models.Model):
     login_id = models.AutoField(primary_key=True)
-    employee_id = models.IntegerField()
+    employee_id = models.CharField(max_length=20)
     created_on = models.DateTimeField(auto_now_add=True)
     modified_on = models.DateTimeField(auto_now=True)
     otp_code = models.CharField(max_length=6, blank=True, null=True)  

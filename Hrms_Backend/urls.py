@@ -27,4 +27,5 @@ urlpatterns = [
     path("dashboard/",include('dashboard.urls')),
     path("calender/",include('Calender.urls')),
     path("leave/",include('Leave.urls')),
+    path("designation/",include('designation.urls')),
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
